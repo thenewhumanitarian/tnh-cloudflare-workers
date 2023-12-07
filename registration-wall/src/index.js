@@ -16,19 +16,17 @@ async function handleRequest(request) {
 
 	try {
 		const formData = await request.json();
-		const { firstName, lastName, email, tagName, interests, gaClientId } = formData;
+		const { firstName, lastName, email, tagName, interests, gaClientId, existing } = formData;
 
 		console.log(formData);
 
 		// Basic validation
-		if (!firstName || !lastName || !email.includes('@')) {
-			return new Response(JSON.stringify({ error: 'Some required form fields are empty or invalid.' }), {
-				status: 400,
-				headers: { "Access-Control-Allow-Origin": "*" } // CORS header
-			});
-		}
-
-		// Todo: more validation here
+		// if (!firstName || !lastName || !email.includes('@')) {
+		// 	return new Response(JSON.stringify({ error: 'Some required form fields are empty or invalid.' }), {
+		// 		status: 400,
+		// 		headers: { "Access-Control-Allow-Origin": "*" } // CORS header
+		// 	});
+		// }
 
 		const emailHash = md5(email);
 		const memberExists = await checkIfMemberExists(emailHash);
@@ -39,7 +37,7 @@ async function handleRequest(request) {
 				await addTagToMember(emailHash, tagName, interests);
 
 				// If successful, then send the GA4 event
-				await sendGA4Event('registration_wall', { status: 'member_existed', email: email }, gaClientId, GA_MEASUREMENT_ID, API_SECRET);
+				await sendGA4Event('registration_wall', { status: 'member_existed', email: email }, gaClientId, GA_MEASUREMENT_ID, GA_API_SECRET);
 
 				// Respond that the member exists and the tag was added
 				return new Response(JSON.stringify({ message: "Member exists. Tag added." }), {
@@ -57,24 +55,31 @@ async function handleRequest(request) {
 				});
 			}
 		} else {
-			try {
-				await createNewMailchimpMember(formData);
-				// If creating member was successful, then send the GA4 event
-				await sendGA4Event('registration_wall', { status: 'new_member', email: email }, gaClientId, GA_MEASUREMENT_ID, API_SECRET);
-
-				return new Response(JSON.stringify({ success: true }), {
-					status: 200,
-					headers: { "Access-Control-Allow-Origin": "*" } // CORS header
-				});
-			} catch (error) {
-				// Handle any errors that occur during Mailchimp member creation
-				console.error('Error creating Mailchimp member:', error);
-
-				// You may choose to send a different response or handle the error appropriately
-				return new Response(JSON.stringify({ success: false, error: 'Error creating member' }), {
+			if (existing === 'yes') {
+				return new Response(JSON.stringify({ success: false, error: "Sorry, this email address wasn't found in our database." }), {
 					status: 500, // Internal Server Error
 					headers: { "Access-Control-Allow-Origin": "*" }
 				});
+			} else {
+				try {
+					await createNewMailchimpMember(formData);
+					// If creating member was successful, then send the GA4 event
+					await sendGA4Event('registration_wall', { status: 'new_member', email: email }, gaClientId, GA_MEASUREMENT_ID, GA_API_SECRET);
+
+					return new Response(JSON.stringify({ success: true }), {
+						status: 200,
+						headers: { "Access-Control-Allow-Origin": "*" } // CORS header
+					});
+				} catch (error) {
+					// Handle any errors that occur during Mailchimp member creation
+					console.error('Error creating Mailchimp member:', error);
+
+					// You may choose to send a different response or handle the error appropriately
+					return new Response(JSON.stringify({ success: false, error: 'Error creating member' }), {
+						status: 500, // Internal Server Error
+						headers: { "Access-Control-Allow-Origin": "*" }
+					});
+				}
 			}
 		}
 	} catch (error) {
@@ -85,6 +90,11 @@ async function handleRequest(request) {
 		});
 	}
 }
+
+// Example usage
+// const GA_MEASUREMENT_ID = 'G-XXXXXXXXXX'; // Your GA4 Measurement ID
+// const CLIENT_ID = 'your_client_id'; // Client ID, unique to each user
+// const API_SECRET = 'your_api_secret'; // Your GA4 API Secret
 
 async function sendGA4Event(event_name, event_params, client_id, measurement_id, api_secret) {
 	try {
@@ -115,11 +125,6 @@ async function sendGA4Event(event_name, event_params, client_id, measurement_id,
 		console.error("Failed to send event to GA4:", error);
 	}
 }
-
-// Example usage
-const GA_MEASUREMENT_ID = 'G-XXXXXXXXXX'; // Your GA4 Measurement ID
-const CLIENT_ID = 'your_client_id'; // Client ID, unique to each user
-const API_SECRET = 'your_api_secret'; // Your GA4 API Secret
 
 // Hashing function using SHA-256
 async function getEmailHash(email) {
