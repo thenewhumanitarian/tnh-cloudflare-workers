@@ -16,7 +16,7 @@ async function handleRequest(request) {
 
 	try {
 		const formData = await request.json();
-		const { firstName, lastName, email, tagName, interests } = formData;
+		const { firstName, lastName, email, tagName, interests, gaClientId } = formData;
 
 		console.log(formData);
 
@@ -39,8 +39,7 @@ async function handleRequest(request) {
 				await addTagToMember(emailHash, tagName, interests);
 
 				// If successful, then send the GA4 event
-				// await sendGA4Event('register', { /* event parameters */ }, 'CLIENT_ID', GA_MEASUREMENT_ID, API_SECRET);
-				await sendGA4Event('register', { /* event parameters */ }, 'UNIQUE_CLIENT_ID_HERE', GA_MEASUREMENT_ID, API_SECRET);
+				await sendGA4Event('registration_wall', { status: 'member_existed', email: email }, gaClientId, GA_MEASUREMENT_ID, API_SECRET);
 
 				// Respond that the member exists and the tag was added
 				return new Response(JSON.stringify({ message: "Member exists. Tag added." }), {
@@ -58,11 +57,25 @@ async function handleRequest(request) {
 				});
 			}
 		} else {
-			await createNewMailchimpMember(formData);
-			return new Response(JSON.stringify({ success: true }), {
-				status: 200,
-				headers: { "Access-Control-Allow-Origin": "*" } // CORS header
-			});
+			try {
+				await createNewMailchimpMember(formData);
+				// If creating member was successful, then send the GA4 event
+				await sendGA4Event('registration_wall', { status: 'new_member', email: email }, gaClientId, GA_MEASUREMENT_ID, API_SECRET);
+
+				return new Response(JSON.stringify({ success: true }), {
+					status: 200,
+					headers: { "Access-Control-Allow-Origin": "*" } // CORS header
+				});
+			} catch (error) {
+				// Handle any errors that occur during Mailchimp member creation
+				console.error('Error creating Mailchimp member:', error);
+
+				// You may choose to send a different response or handle the error appropriately
+				return new Response(JSON.stringify({ success: false, error: 'Error creating member' }), {
+					status: 500, // Internal Server Error
+					headers: { "Access-Control-Allow-Origin": "*" }
+				});
+			}
 		}
 	} catch (error) {
 		console.error('Error:', error);
@@ -82,6 +95,8 @@ async function sendGA4Event(event_name, event_params, client_id, measurement_id,
 				params: event_params,
 			}],
 		};
+
+		console.log(eventData.events[0])
 
 		const response = await fetch(`https://www.google-analytics.com/mp/collect?measurement_id=${measurement_id}&api_secret=${api_secret}`, {
 			method: 'POST',
@@ -151,8 +166,6 @@ async function createNewMailchimpMember(data) {
 			MMERGE6: data.jobTitle
 		}
 	};
-
-	console.log(memberData)
 
 	const response = await fetch(`https://${MAILCHIMP_SERVER_PREFIX}.api.mailchimp.com/3.0/lists/${MAILCHIMP_LIST_ID}/members/`, {
 		method: 'POST',
